@@ -1,0 +1,70 @@
+{
+    //****
+    //*   VSCode task file for gputils.
+    //*
+    //*   Compile, Link and Program PIC micros
+    //*
+    //*   Dependecies: gputils & MPLAB_IPE
+    //*
+    //*
+    //*   2019 Vanderson Carvalho
+    //*****
+ 
+    "version": "2.0.0",
+    "tasks": [
+        {  
+            //
+            // Program PIC Using PicKit3: HEX -> PIC
+            //
+
+            "label": "Program",
+            "type": "shell",
+            "command":"/Applications/microchip/mplabx/v5.30/mplab_platform/mplab_ipe/bin/ipecmd.sh",
+            "args": [
+                "-TPPK3",
+                "-P${config:processor}",
+                "-W",
+                "-M",
+                "-F${fileDirname}/${fileBasenameNoExtension}.hex" 
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "dependsOn": ["Build"]
+        },
+        {
+            //
+            // Link Object Code: OBJ -> HEX
+            //
+
+            "label": "Build",
+            "type": "shell",
+            "command": "/usr/local/bin/gplink",
+            "args": [
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}.hex",
+                "${fileDirname}/${fileBasenameNoExtension}.o",  
+            ],
+            "group": "build",
+            "dependsOn": ["Compile"]
+        },
+        {
+            //
+            // Compile Asm -> OBJ
+            //
+
+            "label": "Compile",
+            "type": "shell",
+            "command": "/usr/local/bin/gpasm",
+            "args": [
+                "-c",
+                "-m",
+                "-p",
+                "${config:processor}",
+                "${file}"  
+            ],
+            "group": "build"
+        }
+    ]
+}

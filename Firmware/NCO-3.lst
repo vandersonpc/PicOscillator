@@ -1,0 +1,328 @@
+gplink-1.5.0 #1285 (Oct  9 2019)
+Copyright (c) 1998-2016 gputils project
+Listing File Generated: 18/11/2019  23:08:38
+
+
+Address  Value    Disassembly              Source
+-------  -----    -----------              ------
+                                           ;*******************************************************************************
+                                           ;
+                                           ;	Filename:		NCO-3.asm
+                                           ;	Date:			15 Nov 2019
+                                           ;	File Version:	1.0
+                                           ;	Author:			Vanderson Carvalho
+                                           ;	Description:
+                                           ;		This program uses a PIC 16F18313 and its Numerically Controlled Oscillator
+                                           ;		It allows for variable frequency operation via a potentiometer
+                                           ;		connected to RA2
+                                           ;
+                                           ;		PIC16F18313 I/O:
+                                           ;			pin 1: VDD
+                                           ;			pin 2: RA5					Output
+                                           ;			pin 3: RA4/AN3				/Halt control: LOW = ON, HIGH = OFF
+                                           ;			pin 4: RA3/~MCLR			Select Operation Mode (LOW = Freerun, HIGH = Manual)
+                                           ;			pin 5: RA2/ANA2				Manual Fire Switch HIGH = PULSE
+                                           ;			pin 6: RA1/ANA1/ICSPCLK		A/D input for frequency control (0-5V)
+                                           ;			pin 7: RA0/ANA0/ISCPDAT		Mode LED Indicator (ON - Manual, OFF - Freerun)
+                                           ;			pin 8: VSS
+                                           ;
+                                           ; The frequency values are based on the CPU clock = 32MHz divided by 4.
+                                           ; The min frequency is also the frequency step size.
+                                           ; The max frequency is 1023 times the min frequency.
+                                           ;
+                                           ; Definitions used by the program which are associated with specific I/O pins:
+                                           ;	O_PULSE				- output pulse pin
+                                           ;	AV_FREQUENCY	- pin for analog voltage for frequency
+                                           ;	AV_RANGE			- pin for analog voltage for range
+                                           ;
+                                           ;*******************************************************************************
+                                           ;*******************************************************************************
+                                           
+                                           #include p16F18313.inc
+                                                   LIST
+
+                                           ;==========================================================================
+                                           ; Build date : Oct 21 2015
+                                           ;  MPASM PIC16F18313 processor include
+                                           ; 
+                                           ;  (c) Copyright 1999-2015 Microchip Technology, All rights reserved
+                                           ;==========================================================================
+
+                                                   NOLIST
+                                           
+                                           ; CONFIG1
+                                           ; __config 0xDF8F
+                                            __CONFIG _CONFIG1, _FEXTOSC_OFF & _RSTOSC_HFINT32 & _CLKOUTEN_OFF & _CSWEN_ON & _FCMEN_OFF
+                                           ; CONFIG2
+                                           ; __config 0xF732
+                                            __CONFIG _CONFIG2, _MCLRE_OFF & _PWRTE_OFF & _WDTE_OFF & _LPBOREN_OFF & _BOREN_OFF & _BORV_LOW & _PPS1WAY_OFF & _STVREN_ON & _DEBUG_OFF
+                                           ; CONFIG3
+                                           ; __config 0x3
+                                            __CONFIG _CONFIG3, _WRT_OFF & _LVP_OFF
+                                           ; CONFIG4
+                                           ; __config 0x3
+                                            __CONFIG _CONFIG4, _CP_OFF & _CPD_OFF
+                                           
+                                           
+                                           O_PULSE			equ	RA5
+                                           O_PPS			equ	RA5PPS
+                                           I_ON_OFF		equ	RA4
+                                           AV_FREQUENCY	equ	RA1
+                                           MODE			equ	RA3
+                                           MODE_LED		equ	RA0
+                                           MAN_SWITCH		equ	RA2
+                                           
+                                           TRISA_VAL		equ	(1<<AV_FREQUENCY) | (1<<MODE) | (1<<I_ON_OFF) | (1<<MAN_SWITCH)
+                                           ADCH_FREQ		equ	( AV_FREQUENCY<<CHS0 ) | (1<< ADON )
+                                           
+                                           RIGHT_JUSTIFY	equ	0x80 | (b'010'<<ADCS0)
+                                           LEFT_JUSTIFY	equ	0 | (b'010'<<ADCS0)		; not used by this program
+                                           
+                                           
+                                           ;*******************************************************************************
+                                           ; RAM
+                                           ;*******************************************************************************
+                                           
+                                           Access_RAM		udata_shr	0x70		; 16 bytes starting at address 0x70
+                                           NCO_Accum		res	3
+                                           Range			res	1
+                                           Dbg_Range		res	1
+                                           Dcnt1			res	1
+                                           Dcnt2			res	1
+                                           Dcnt3			res	1
+                                           ;*******************************************************************************
+                                           ; Vectors
+                                           ;*******************************************************************************
+                                           
+                                           	org	0
+000000   2805     goto    0x0005           	goto	Main
+                                           
+                                           	org	0x04											; interrupt vector
+                                           ISR.Exit
+000004   0009     retfie                   	retfie
+                                           
+                                           
+                                           ;*******************************************************************************
+                                           ; MAIN PROGRAM
+                                           ;*******************************************************************************
+                                           
+                                           MAIN_PROG CODE                  				; let linker place main program
+                                           
+                                           Main
+000005   205b     call    0x005b           	call		init							; initialize the system hardware
+                                           
+000006   0021     movlb   0x01             	BANKSEL	ADCON0
+000007   3005     movlw   0x05             	movlw		ADCH_FREQ						; set the A/D channel and keep A/D on
+000008   009d     movwf   0x1d             	movwf		ADCON0
+000009   149d     bsf     0x1d, 0x1        	bsf			ADCON0, ADGO					; start first conversion
+                                           
+                                           ;*******************************************************************************
+                                           ; Main Program Loop
+                                           ;*******************************************************************************
+                                           Main.10
+00000a   2029     call    0x0029           	call		Check_On_Off
+00000b   200e     call    0x000e           	call		Check_Mode					
+00000c   2036     call    0x0036           	call		Get.Frequency
+00000d   280a     goto    0x000a           	goto		Main.10
+                                           
+                                           ;**
+                                           ;** Check operation mode ** 
+                                           ;**
+                                           
+                                           Check_Mode
+00000e   0020     movlb   0x00             	BANKSEL	PORTA
+00000f   100c     bcf     0x0c, 0x0        	bcf			LATA, MODE_LED
+000010   1e0c     btfss   0x0c, 0x4        	btfss		PORTA, I_ON_OFF					; skip next if HALT
+000011   1d8c     btfss   0x0c, 0x3        	btfss		PORTA, MODE						; skip next if MODE=HIGH=MANUAL
+000012   0008     return                   	return
+000013   140c     bsf     0x0c, 0x0        	bsf			LATA, MODE_LED
+000014   1d0c     btfss   0x0c, 0x2        	btfss    	PORTA, MAN_SWITCH
+000015   0008     return                   	return
+                                           SW_LOOP
+000016   190c     btfsc   0x0c, 0x2        	btfsc		PORTA, MAN_SWITCH
+000017   2816     goto    0x0016           	goto 		SW_LOOP
+000018   2819     goto    0x0019           	goto 		Set_Out
+                                           Set_Out
+000019   168c     bsf     0x0c, 0x5        	bsf			PORTA, O_PULSE
+00001a   201e     call    0x001e           	call		Delay_100ms
+00001b   0022     movlb   0x02             	BANKSEL	LATA
+00001c   018c     clrf    0x0c             	clrf		LATA
+00001d   0008     return                   	return
+                                           ;Check_Mode
+                                           
+                                           ;**
+                                           ;** 10ms Delay **
+                                           ;**
+                                           
+                                           Delay_100ms:
+00001e   30b9     movlw   0xb9             	movlw		0xB9
+00001f   00f5     movwf   0x75             	movwf		Dcnt1
+000020   3020     movlw   0x20             	movlw		0x20
+000021   00f6     movwf   0x76             	movwf		Dcnt2
+000022   3002     movlw   0x02             	movlw		0x02
+000023   00f7     movwf   0x77             	movwf		Dcnt3
+                                           Loop
+000024   0bf5     decfsz  0x75, 0x1        	decfsz		Dcnt1, f
+000025   2824     goto    0x0024           	goto 		Loop
+000026   0bf6     decfsz  0x76, 0x1        	decfsz		Dcnt2, f
+000027   2824     goto    0x0024           	goto 		Loop
+                                           ;	decfsz		Dcnt3, 
+                                           ;	goto 		Loop
+000028   0008     return                   	return
+                                           ;Delay_100ms
+                                           
+                                           ;**
+                                           ;** Halt Oscillator & Manual **
+                                           ;**
+                                           
+                                           Check_On_Off
+000029   0020     movlb   0x00             	BANKSEL	PORTA
+00002a   1d8c     btfss   0x0c, 0x3        	btfss		PORTA, MODE						; If MODE=HIGH=Manual turn Off NCO
+00002b   1a0c     btfsc   0x0c, 0x4        	btfsc		PORTA, I_ON_OFF					; skip next if on
+00002c   2831     goto    0x0031           	goto		Turn_Off
+                                           ; here if switch is on
+00002d   003d     movlb   0x1d             	BANKSEL	O_PPS
+00002e   301d     movlw   0x1d             	movlw		b'11101'						; NCO output
+00002f   0095     movwf   0x15             	movwf		O_PPS
+000030   0008     return                   	return
+                                           Turn_Off
+000031   003d     movlb   0x1d             	BANKSEL	O_PPS
+000032   0195     clrf    0x15             	clrf		O_PPS
+000033   0022     movlb   0x02             	BANKSEL	LATA
+000034   018c     clrf    0x0c             	clrf		LATA							; make output low
+000035   0008     return                   	return
+                                           ; Check_On_Off
+                                           
+                                           ;**
+                                           ;** Get Frenquecy from ADC **
+                                           ;**
+                                           
+                                           Get.Frequency
+000036   3005     movlw   0x05             	movlw		ADCH_FREQ
+000037   2052     call    0x0052           	call		AD.Read
+                                           
+                                           ; test for 0
+000038   081b     movf    0x1b, 0x0        	movfw		ADRESL
+000039   041c     iorwf   0x1c, 0x0        	iorwf		ADRESH, w
+00003a   1903     btfsc   0x03, 0x2        	btfsc		STATUS, Z
+00003b   0a9b     incf    0x1b, 0x1        	incf		ADRESL, f
+                                           ;
+                                           
+00003c   081b     movf    0x1b, 0x0        	movfw		ADRESL
+                                           
+00003d   00f0     movwf   0x70             	movwf		NCO_Accum						; store Low byte for processing
+00003e   081c     movf    0x1c, 0x0        	movfw		ADRESH
+                                           
+00003f   00f1     movwf   0x71             	movwf		NCO_Accum+1						; store High byte for processing
+000040   01f2     clrf    0x72             	clrf		NCO_Accum+2						; ensure U byte is clear
+                                           
+                                           Get.Frequency.10
+000041   1903     btfsc   0x03, 0x2        	btfsc		STATUS, Z						; skip next if not done
+000042   2848     goto    0x0048           	goto		Get.Frequency.20
+000043   35f0     lslf    0x70, 0x1        	lslf		NCO_Accum, f					; L
+000044   0df1     rlf     0x71, 0x1        	rlf			NCO_Accum+1, f					; H
+000045   0df2     rlf     0x72, 0x1        	rlf			NCO_Accum+2, f					; U
+000046   0389     decf    0x09, 0x1        	decf		WREG, f							; update shift counter
+000047   2841     goto    0x0041           	goto		Get.Frequency.10
+                                           ; put the results into the increment registers
+                                           Get.Frequency.20
+000048   0029     movlb   0x09             	BANKSEL	NCO1INCU
+000049   0872     movf    0x72, 0x0        	movfw		NCO_Accum+2						; get U byte
+00004a   3000     movlw   0x00             	movlw 		0
+00004b   009d     movwf   0x1d             	movwf		NCO1INCU
+00004c   0871     movf    0x71, 0x0        	movfw		NCO_Accum+1						; get H byte
+00004d   3000     movlw   0x00             	movlw		0
+00004e   009c     movwf   0x1c             	movwf		NCO1INCH
+                                           
+00004f   0870     movf    0x70, 0x0        	movfw		NCO_Accum+0
+000050   009b     movwf   0x1b             	movwf		NCO1INCL						; this writes all 3 bytes to the register
+000051   0008     return                   	return
+                                           ; Get.Frequency
+                                           
+                                           ;**
+                                           ;** Read the 10bits ADC **
+                                           ;**
+                                           
+                                           AD.Read
+                                           ; read the 10 bit A/D
+                                           ; enter with w = A/D channel in appropriate bits and ADON bit set
+                                           ; exit with 10 bit value in AD registers
+                                           ;		w = low byte value
+                                           ;		BANKSEL = ADCON0
+                                           
+000052   0021     movlb   0x01             	BANKSEL	ADCON0
+000053   009d     movwf   0x1d             	movwf		ADCON0							; set the channel and keep A/D on
+                                           ; delay for acquisition time - 20 instruction sycles
+000054   3007     movlw   0x07             	movlw		.7
+                                           AD.Read.05
+000055   0b89     decfsz  0x09, 0x1        	decfsz		WREG, f							; 1 update count, skip next if done
+000056   2855     goto    0x0055           	goto		AD.Read.05						; 2
+000057   149d     bsf     0x1d, 0x1        	bsf			ADCON0, ADGO					; start the conversion
+                                           AD.Read.10
+000058   189d     btfsc   0x1d, 0x1        	btfsc		ADCON0, ADGO					; skip next if done conversion
+000059   2858     goto    0x0058           	goto		AD.Read.10						; wait for done
+00005a   0008     return                   	return
+                                           ; AD.Read
+                                           
+                                           ;*******************************************************************************
+                                           ;Initialize Hardware
+                                           ;*******************************************************************************
+                                           
+                                           init	; initialize the system hardware
+                                           
+                                           ; Oscillator - set to 32MHz using 8MHz clock and PLL
+00005b   0032     movlb   0x12             	BANKSEL	OSCCON1
+00005c   3062     movlw   0x62             	movlw		(b'110'<<NOSC0) | (b'0010'<<NDIV0)
+00005d   0099     movwf   0x19             	movwf		OSCCON1							; HFINTOSC with 2x PLL (32 MHz), DIV = 4
+                                           												; OSCCON2 is read-only
+00005e   019b     clrf    0x1b             	clrf		OSCCON3
+00005f   3040     movlw   0x40             	movlw		1<<HFOEN						; enable the HF internal oscillator
+000060   009d     movwf   0x1d             	movwf		OSCEN
+000061   3003     movlw   0x03             	movlw		3								; select 32MHz
+000062   009f     movwf   0x1f             	movwf		OSCFRQ
+                                           init.10
+000063   1d9b     btfss   0x1b, 0x3        	btfss		OSCCON3, NOSCR					; wait for oscillator ready
+000064   2863     goto    0x0063           	goto		init.10
+                                           
+                                           ; Port A
+000065   0020     movlb   0x00             	BANKSEL	PORTA
+000066   018c     clrf    0x0c             	clrf		PORTA
+000067   0021     movlb   0x01             	BANKSEL	TRISA
+000068   301e     movlw   0x1e             	movlw		TRISA_VAL
+000069   008c     movwf   0x0c             	movwf		TRISA							; set analog and digital input pins
+00006a   0023     movlb   0x03             	BANKSEL	ANSELA
+00006b   3002     movlw   0x02             	movlw		b'00000010'						; set analog input pins RA1
+00006c   008c     movwf   0x0c             	movwf		ANSELA
+00006d   0027     movlb   0x07             	BANKSEL	INLVLA
+00006e   30ff     movlw   0xff             	movlw		0xFF							; set up to
+00006f   008c     movwf   0x0c             	movwf		INLVLA							; make all inputs Schmitt Trigger CMOS
+                                           
+                                           ; Peripheral Pin Select
+000070   003d     movlb   0x1d             	BANKSEL	RA5PPS
+000071   301d     movlw   0x1d             	movlw		b'11101'						; NCO output
+000072   0095     movwf   0x15             	movwf		RA5PPS
+                                           
+                                           ; A/D convertor
+000073   0021     movlb   0x01             	BANKSEL	ADCON0
+000074   3001     movlw   0x01             	movlw		(1<<ADON)						; A/D on, used later to select A/D channel
+000075   009d     movwf   0x1d             	movwf		ADCON0
+000076   30a0     movlw   0xa0             	movlw		RIGHT_JUSTIFY					; clk=Fosc/32, VRPOS=VDD, right justify data
+000077   009e     movwf   0x1e             	movwf		ADCON1
+000078   019f     clrf    0x1f             	clrf		ADACT							; no auto conversion trigger
+                                           
+                                           ; Interrupts
+000079   018b     clrf    0x0b             	clrf		INTCON							; clear global interrupt enable
+00007a   0021     movlb   0x01             	BANKSEL	PIE0
+00007b   0190     clrf    0x10             	clrf		PIE0							; clear peripheral interrupt enables
+00007c   0191     clrf    0x11             	clrf		PIE1							; clear peripheral interrupt enables
+                                           
+                                           ; NCO
+00007d   0029     movlb   0x09             	BANKSEL	NCO1ACCL
+00007e   3001     movlw   0x01             	movlw		b'01'							; use Fosc for clock
+00007f   009f     movwf   0x1f             	movwf		NCO1CLK
+000080   3080     movlw   0x80             	movlw		(1<<N1EN) | (0<<N1PFM)			; enable NCO1, set to Fixed Duty Cycle (50%)
+000081   009e     movwf   0x1e             	movwf		NCO1CON
+000082   0008     return                   	return
+                                           ; init
+                                           
+                                           	END

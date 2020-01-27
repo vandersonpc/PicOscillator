@@ -1,0 +1,32 @@
+#!/bin/bash
+
+##
+## Compile and Link PIC ASM using gputils
+##
+## 2019 - Vanderson Carvalho
+
+filename=$(basename "$2")
+fname="${filename%.*}"
+echo ""
+echo "GPUTIL - PIC ASSEMBLER & LINKER"
+echo "==================2019 by VPC=="
+
+if [[ $# < 2 ]]; 
+then 
+    echo "Error: missing Arguments"
+else 
+    echo "Input File : $fname.asm"
+    echo "Output File: $fname.hex"
+	 echo "Memory File: $fname.m"
+    echo "Processor  : $1"
+	 echo ""
+	 gpasm -c -m -p $1 $fname.asm >> $fname.m
+	 gplink -o $fname.hex $fname.o
+	 
+	 echo "" >> $fname.m
+	 hexdump $fname.hex >> $fname.m 
+	 
+    echo ""
+	 echo "Process finished!!"
+fi	 
+
